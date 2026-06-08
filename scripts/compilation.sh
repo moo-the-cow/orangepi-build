@@ -288,6 +288,7 @@ compile_uboot()
 	DIR=/usr/lib/$uboot_name
 	$(declare -f write_uboot_platform)
 	$(declare -f write_uboot_platform_mtd)
+	$(declare -f write_uboot_platform_ufs)
 	$(declare -f setup_write_uboot_platform)
 	EOF
 
@@ -455,7 +456,7 @@ CUSTOM_KERNEL_CONFIG
 	cp "$EXTER"/patch/misc/headers-debian-byteshift.patch /tmp
 
 	if [[ $KERNEL_CONFIGURE != yes ]]; then
-		if [[ $BRANCH == legacy && ! $BOARDFAMILY =~ "rockchip-rk3588"|"rockchip-rk356x" ]]; then
+		if [[ $BRANCH == legacy && ! $BOARDFAMILY =~ "rockchip-rk3588"|"rockchip-rk356x"|"sun60iw2" ]]; then
 			eval CCACHE_BASEDIR="$(pwd)" env PATH="${toolchain}:${PATH}" \
 				'make ARCH=$ARCHITECTURE CROSS_COMPILE="$CCACHE $KERNEL_COMPILER" silentoldconfig'
 		else
@@ -506,6 +507,13 @@ CUSTOM_KERNEL_CONFIG
 		exit_with_error "Kernel was not built" "@host"
 	fi
 
+	if [[ ${BOARDFAMILY} == cix ]]; then
+		[[ -d ${SRC}/output/cix ]] && rm -rf ${SRC}/output/cix
+		mkdir -p ${SRC}/output/cix/ > /dev/null 2>&1
+		cp ${kerneldir}/arch/arm64/boot/Image ${SRC}/output/cix/
+		cp ${kerneldir}/arch/arm64/boot/dts/cix/sky1-*dtb ${SRC}/output/cix/
+	fi
+
 	# different packaging for 4.3+
 	if linux-version compare "${version}" ge 4.3; then
 		local kernel_packing="bindeb-pkg"
@@ -516,6 +524,11 @@ CUSTOM_KERNEL_CONFIG
 	#if [[ $BRANCH == legacy && $LINUXFAMILY =~ sun50iw2|sun50iw6|sun50iw9 ]]; then
 	#	make -C modules/gpu LICHEE_MOD_DIR=${SRC}/.tmp/gpu_modules_${LINUXFAMILY} LICHEE_KDIR=${kerneldir} CROSS_COMPILE=$toolchain/$KERNEL_COMPILER ARCH=$ARCHITECTURE
 	#fi
+
+	if [[ $LINUXFAMILY =~ sun60iw2 ]]; then
+		make -C bsp/modules/gpu LICHEE_TOOLCHAIN_PATH=$toolchain LICHEE_CROSS_COMPILER=$KERNEL_COMPILER LICHEE_PLATFORM=linux LICHEE_MOD_DIR=${SRC}/.tmp/gpu_modules_${LINUXFAMILY} LICHEE_KERN_DIR=${kerneldir} CROSS_COMPILE=$toolchain/$KERNEL_COMPILER ARCH=$ARCHITECTURE
+		make -C bsp/modules/gpu modules_install LICHEE_TOOLCHAIN_PATH=$toolchain LICHEE_CROSS_COMPILER=$KERNEL_COMPILER LICHEE_PLATFORM=linux LICHEE_MOD_DIR=${SRC}/.tmp/gpu_modules_${LINUXFAMILY} LICHEE_KERN_DIR=${kerneldir} CROSS_COMPILE=$toolchain/$KERNEL_COMPILER ARCH=$ARCHITECTURE
+	fi
 
 	display_alert "Creating packages"
 
@@ -541,6 +554,8 @@ CUSTOM_KERNEL_CONFIG
 	rm -f linux-firmware-image-*.deb
 
 	rsync --remove-source-files -rq ./*.deb "${DEB_STORAGE}/" || exit_with_error "Failed moving kernel DEBs"
+
+	[[ $(type -t family_tweaks_kernel) == function ]] && family_tweaks_kernel
 
 	# store git hash to the file and create a change log
 	#HASHTARGET="${EXTER}/cache/hash"$([[ ${BETA} == yes ]] && echo "-beta")"/linux-image-${BRANCH}-${LINUXFAMILY}"
@@ -592,7 +607,12 @@ compile_firmware()
 	plugin_dir="orangepi-firmware${FULL}"
 	mkdir -p "${firmwaretempdir}/${plugin_dir}/lib/firmware"
 
-	[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "https://github.com/orangepi-xunlong/firmware" "${EXTER}/cache/sources/orangepi-firmware-git" "branch:master"
+	if [[ $GITEE_SERVER == yes ]]; then
+		[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "https://gitee.com/orangepi-xunlong/firmware" "${EXTER}/cache/sources/orangepi-firmware-git" "branch:master"
+	else
+		[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "https://github.com/orangepi-xunlong/firmware" "${EXTER}/cache/sources/orangepi-firmware-git" "branch:master"
+	fi
+
 	if [[ -n $FULL ]]; then
 		[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "$MAINLINE_FIRMWARE_SOURCE" "${EXTER}/cache/sources/linux-firmware-git" "branch:master"
 		# cp : create hardlinks
@@ -645,8 +665,13 @@ compile_orangepi-zsh()
 	orangepi_zsh_dir=orangepi-zsh_${REVISION}_all
 	display_alert "Building deb" "orangepi-zsh" "info"
 
-	[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "https://github.com/robbyrussell/oh-my-zsh" "${EXTER}/cache/sources/oh-my-zsh" "branch:master"
-	[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "https://github.com/mroth/evalcache" "${EXTER}/cache/sources/evalcache" "branch:master"
+	if [[ $GITEE_SERVER == yes ]]; then
+		[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "https://gitee.com/orangepi-xunlong/oh-my-zsh" "${EXTER}/cache/sources/oh-my-zsh" "branch:master"
+		[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "https://gitee.com/orangepi-xunlong/evalcache" "${EXTER}/cache/sources/evalcache" "branch:master"
+	else
+		[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "https://github.com/robbyrussell/oh-my-zsh" "${EXTER}/cache/sources/oh-my-zsh" "branch:master"
+		[[ $IGNORE_UPDATES != yes ]] && fetch_from_repo "https://github.com/mroth/evalcache" "${EXTER}/cache/sources/evalcache" "branch:master"
+	fi
 
 	mkdir -p "${tmp_dir}/${orangepi_zsh_dir}"/{DEBIAN,etc/skel/,etc/oh-my-zsh/,/etc/skel/.oh-my-zsh/cache}
 
